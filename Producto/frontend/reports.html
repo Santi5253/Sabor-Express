@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reports — SaborExpress</title>
+  <link rel="stylesheet" href="/assets/css/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <h2 style="color:var(--brand-dark)">Operational Reports</h2>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="grid cols-4">
+        <div>
+          <label>Branch</label>
+          <select id="branch"></select>
+        </div>
+        <div>
+          <label>From</label>
+          <input type="date" id="dateFrom" />
+        </div>
+        <div>
+          <label>To</label>
+          <input type="date" id="dateTo" />
+        </div>
+        <div style="display:flex;align-items:end;gap:8px">
+          <button onclick="generate()">Generate</button>
+          <button class="secondary" onclick="exportExcel()" id="btnExport" disabled>Export Excel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="results" style="display:none">
+      <div class="grid cols-4" style="margin-bottom:16px">
+        <div class="card"><div class="muted">Total Sales</div><div style="font-size:24px;font-weight:700;color:var(--brand-dark)" id="rTotal">S/ 0.00</div></div>
+        <div class="card"><div class="muted">Orders</div><div style="font-size:24px;font-weight:700" id="rOrders">0</div></div>
+        <div class="card"><div class="muted">Avg. Ticket</div><div style="font-size:24px;font-weight:700" id="rAvg">S/ 0.00</div></div>
+        <div class="card"><div class="muted">IGV Total (18%)</div><div style="font-size:24px;font-weight:700" id="rIgv">S/ 0.00</div></div>
+      </div>
+
+      <div class="card">
+        <h2>Breakdown by payment method</h2>
+        <table>
+          <thead><tr><th>Method</th><th>Count</th><th>Total</th></tr></thead>
+          <tbody id="breakdown"><tr><td colspan="3" class="muted">No payments in range.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/js/app.js"></script>
+  <script src="/assets/js/services/admin.service.js"></script>
+  <script src="/assets/js/services/report.service.js"></script>
+  <script>
+    const user = initPage(['Administrador']);
+    let lastReport = null;
+
+    function todayISO(offsetDays = 0) {
+      const d = new Date();
+      d.setDate(d.getDate() + offsetDays);
+      return d.toISOString().slice(0, 10);
+    }
+
+    async function init() {
+      if (!user) return;
+      document.getElementById('dateFrom').value = todayISO(-7);
+      document.getElementById('dateTo').value = todayISO();
+      try {
+        const branches = await BranchService.list();
+        document.getElementById('branch').innerHTML = branches.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+        if (user.branch_id) document.getElementById('branch').value = user.branch_id;
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function generate() {
+      const branchId = document.getElementById('branch').value;
+      const from = document.getElementById('dateFrom').value;
+      const to = document.getElementById('dateTo').value;
+      if (!branchId || !from || !to) { toast('Complete all filters', 'error'); return; }
+      try {
+        const r = await ReportService.generate(parseInt(branchId), from, to);
+        lastReport = r;
+        document.getElementById('results').style.display = 'block';
+        document.getElementById('rTotal').textContent = money(r.total_sales);
+        document.getElementById('rOrders').textContent = r.total_orders;
+        document.getElementById('rAvg').textContent = money(r.avg_ticket);
+        document.getElementById('rIgv').textContent = money(r.igv_total);
+        document.getElementById('breakdown').innerHTML = r.breakdown.length
+          ? r.breakdown.map(b => `<tr><td>${esc(b.method)}</td><td>${b.count}</td><td>${money(b.total)}</td></tr>`).join('')
+          : '<tr><td colspan="3" class="muted">No payments in range.</td></tr>';
+        document.getElementById('btnExport').disabled = false;
+        toast('Report generated', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function exportExcel() {
+      const branchId = document.getElementById('branch').value;
+      const from = document.getElementById('dateFrom').value;
+      const to = document.getElementById('dateTo').value;
+      try {
+        await ReportService.export(parseInt(branchId), from, to);
+        toast('Excel file downloaded', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    init();
+  </script>
+</body>
+</html>

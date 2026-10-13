@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SaborExpress</title>
+  <script>
+    (function () {
+      const token = localStorage.getItem('token');
+      const user = JSON.parse(localStorage.getItem('user') || 'null');
+      if (!token || !user) { window.location.href = '/login.html'; return; }
+      const home = { Mesero: '/take-order.html', Cajero: '/close-and-pay.html', Administrador: '/admin.html' };
+      window.location.href = home[user.role] || '/login.html';
+    })();
+  </script>
+</head>
+<body></body>
+</html>

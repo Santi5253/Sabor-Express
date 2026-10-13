@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Table Map — SaborExpress</title>
+  <link rel="stylesheet" href="/assets/css/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2 style="color:var(--brand-dark)">Table Map</h2>
+      <div id="summary" class="muted"></div>
+    </div>
+    <div class="card">
+      <div id="map" class="table-map"></div>
+    </div>
+  </div>
+
+  <script src="/assets/js/app.js"></script>
+  <script src="/assets/js/services/admin.service.js"></script>
+  <script>
+    const user = initPage(); // cualquier rol autenticado
+    let previousState = '';
+
+    async function load() {
+      if (!user) return;
+      try {
+        const tables = await TableService.list(user.branch_id);
+        const state = JSON.stringify(tables.map(t => [t.id, t.status]));
+        if (state === previousState) return;
+        previousState = state;
+
+        document.getElementById('map').innerHTML = tables.map(t => `
+          <div class="table-box ${t.status === 'Occupied' ? 'occupied' : 'free'}">
+            <div class="num">${t.number}</div>
+            <div>${t.capacity} pax</div>
+            <div style="font-size:11px;opacity:.9">${t.status}</div>
+          </div>`).join('') || '<p class="muted">No tables configured.</p>';
+
+        const free = tables.filter(t => t.status === 'Free').length;
+        document.getElementById('summary').textContent =
+          `Available: ${free} | Occupied: ${tables.length - free}`;
+      } catch (e) { toast(e.message, 'error'); }
+    }
+    load();
+    setInterval(load, 10000); // polling cada 10 s (HU013)
+  </script>
+</body>
+</html>

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Take Order — SaborExpress</title>
+  <link rel="stylesheet" href="/assets/css/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <h2 style="color:var(--brand-dark)">Take Order</h2>
+    <div class="grid cols-3">
+      <!-- Menu -->
+      <div class="card" style="grid-column: span 2;">
+        <div style="display:flex;gap:10px;align-items:end;margin-bottom:12px">
+          <div style="flex:1">
+            <label>Search product</label>
+            <input id="search" placeholder="Type a product name…" oninput="renderMenu()" />
+          </div>
+          <div style="flex:1">
+            <label>Category</label>
+            <select id="categoryFilter" onchange="renderMenu()"><option value="">All categories</option></select>
+          </div>
+        </div>
+        <div id="menu" class="grid cols-3"></div>
+      </div>
+
+      <!-- Cart -->
+      <div class="card">
+        <h2>Current Order</h2>
+        <label>Table</label>
+        <select id="tableSelect"></select>
+        <label>Guests</label>
+        <input type="number" id="guests" value="1" min="1" max="99" />
+
+        <div id="cart"></div>
+        <div class="totals">
+          <div class="row"><span>Subtotal</span><span id="subtotal">S/ 0.00</span></div>
+          <div class="row"><span>IGV (18%)</span><span id="igv">S/ 0.00</span></div>
+          <div class="row total"><span>Total</span><span id="total">S/ 0.00</span></div>
+        </div>
+        <button id="btnSave" style="width:100%;margin-top:12px" onclick="saveOrder()" disabled>Save Order</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quantity modal -->
+  <div class="modal-backdrop" id="modal">
+    <div class="modal">
+      <h3 id="modalTitle">Add product</h3>
+      <label>Quantity (1–99)</label>
+      <input type="number" id="modalQty" value="1" min="1" max="99" />
+      <label>Notes (optional, max 200)</label>
+      <textarea id="modalNotes" maxlength="200" rows="2"></textarea>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="secondary" onclick="closeModal()">Cancel</button>
+        <button onclick="confirmAdd()">Add to order</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/js/app.js"></script>
+  <script src="/assets/js/services/admin.service.js"></script>
+  <script src="/assets/js/services/order.service.js"></script>
+  <script>
+    const user = initPage(['Mesero', 'Administrador']);
+    let products = [], cart = [], pendingProduct = null;
+    const IGV = 0.18;
+
+    async function load() {
+      try {
+        if (!user) return;
+        const tables = await TableService.list(user.branch_id);
+        document.getElementById('tableSelect').innerHTML = tables.map(t =>
+          `<option value="${t.id}" ${t.status === 'Occupied' ? '' : ''}>Table ${t.number} · ${t.capacity} pax · ${t.status}</option>`).join('');
+
+        products = await ProductService.list(user.branch_id);
+        const cats = [...new Set(products.map(p => p.product_type))];
+        document.getElementById('categoryFilter').innerHTML += cats.map(c => `<option>${esc(c)}</option>`).join('');
+        renderMenu();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    function renderMenu() {
+      const q = document.getElementById('search').value.toLowerCase();
+      const cat = document.getElementById('categoryFilter').value;
+      const list = products.filter(p => (!cat || p.product_type === cat) && p.name.toLowerCase().includes(q));
+      document.getElementById('menu').innerHTML = list.map(p => {
+        const disabled = !p.is_available;
+        return `<div class="menu-item ${disabled ? 'disabled' : ''}" ${disabled ? '' : `onclick="openModal(${p.id})"`}>
+          <div class="name">${esc(p.name)}</div>
+          <div class="type">${esc(p.product_type)} ${disabled ? '· <b>Sold out</b>' : ''}</div>
+          <div class="price">${money(p.price)}</div>
+        </div>`;
+      }).join('') || '<p class="muted">No products found.</p>';
+    }
+
+    function openModal(id) {
+      pendingProduct = products.find(p => p.id === id);
+      document.getElementById('modalTitle').textContent = 'Add: ' + pendingProduct.name;
+      document.getElementById('modalQty').value = 1;
+      document.getElementById('modalNotes').value = '';
+      document.getElementById('modal').classList.add('show');
+    }
+    function closeModal() { document.getElementById('modal').classList.remove('show'); }
+
+    function confirmAdd() {
+      const qty = Math.min(99, Math.max(1, parseInt(document.getElementById('modalQty').value) || 1));
+      const notes = document.getElementById('modalNotes').value.trim().slice(0, 200);
+      const existing = cart.find(c => c.product.id === pendingProduct.id && (c.notes || '') === notes);
+      if (existing) existing.quantity = Math.min(99, existing.quantity + qty);
+      else cart.push({ product: pendingProduct, quantity: qty, notes });
+      closeModal();
+      renderCart();
+    }
+
+    function changeQty(idx, delta) {
+      cart[idx].quantity += delta;
+      if (cart[idx].quantity <= 0) cart.splice(idx, 1);
+      renderCart();
+    }
+    function removeLine(idx) { cart.splice(idx, 1); renderCart(); }
+
+    function renderCart() {
+      document.getElementById('cart').innerHTML = cart.length ? cart.map((c, i) => `
+        <div class="cart-line">
+          <div>
+            <div><strong>${esc(c.product.name)}</strong></div>
+            <div class="muted">${money(c.product.price)} · ${c.notes ? esc(c.notes) : 'no notes'}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <button class="sm secondary" onclick="changeQty(${i},-1)">−</button>
+            <span>${c.quantity}</span>
+            <button class="sm secondary" onclick="changeQty(${i},1)">+</button>
+            <button class="sm danger" onclick="removeLine(${i})">✕</button>
+          </div>
+        </div>`).join('') : '<p class="muted">Cart is empty.</p>';
+
+      const subtotal = cart.reduce((s, c) => s + c.product.price * c.quantity, 0);
+      const igv = subtotal * IGV;
+      document.getElementById('subtotal').textContent = money(subtotal);
+      document.getElementById('igv').textContent = money(igv);
+      document.getElementById('total').textContent = money(subtotal + igv);
+      document.getElementById('btnSave').disabled = cart.length === 0;
+    }
+
+    async function saveOrder() {
+      const tableId = parseInt(document.getElementById('tableSelect').value);
+      if (!tableId) { toast('Select a table first', 'error'); return; }
+      const btn = document.getElementById('btnSave');
+      btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        const items = cart.map(c => ({ product_id: c.product.id, quantity: c.quantity, notes: c.notes || null }));
+        const order = await OrderService.create(tableId, parseInt(document.getElementById('guests').value) || 1, items);
+        toast(`Order ${order.order_number} saved and sent to kitchen`, 'success');
+        cart = []; renderCart(); await load();
+      } catch (e) {
+        toast(e.message, 'error');
+      } finally {
+        btn.textContent = 'Save Order';
+        btn.disabled = cart.length === 0;
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>

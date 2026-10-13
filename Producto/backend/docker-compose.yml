@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: saborexpress-db
+    environment:
+      POSTGRES_USER: sabor
+      POSTGRES_PASSWORD: sabor
+      POSTGRES_DB: saborexpress
+    ports:
+      - "5432:5432"
+    volumes:
+      - saborexpress_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sabor -d saborexpress"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: saborexpress-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://sabor:sabor@db:5432/saborexpress
+      SECRET_KEY: cambia-esta-clave-en-produccion
+      ACCESS_TOKEN_EXPIRE_MINUTES: "3"
+      MAX_CONCURRENT_USERS: "20"
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "python seed.py || true && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+volumes:
+  saborexpress_pgdata:

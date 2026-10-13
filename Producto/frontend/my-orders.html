@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Orders — SaborExpress</title>
+  <link rel="stylesheet" href="/assets/css/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <h2 style="color:var(--brand-dark)">My Orders</h2>
+    <div class="card">
+      <table>
+        <thead><tr><th>Order #</th><th>Table</th><th>Time</th><th>Items</th><th>Status</th><th>Total</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="/assets/js/app.js"></script>
+  <script src="/assets/js/services/order.service.js"></script>
+  <script>
+    const user = initPage(['Mesero', 'Administrador']);
+
+    async function load() {
+      if (!user) return;
+      try {
+        const orders = await OrderService.myActive();
+        document.getElementById('rows').innerHTML = orders.length ? orders.map(o => `
+          <tr>
+            <td><strong>${esc(o.order_number)}</strong></td>
+            <td>Table ${o.table_id}</td>
+            <td>${new Date(o.opened_at).toLocaleTimeString()}</td>
+            <td>${o.items.map(i => `${i.quantity}× #${i.product_id}`).join(', ') || '—'}</td>
+            <td><span class="badge open">${o.status}</span></td>
+            <td>${money(o.total)}</td>
+          </tr>`).join('') : '<tr><td colspan="6" class="muted">No active orders.</td></tr>';
+      } catch (e) { toast(e.message, 'error'); }
+    }
+    load();
+    setInterval(load, 10000); // actualización en tiempo real (polling 10 s)
+  </script>
+</body>
+</html>

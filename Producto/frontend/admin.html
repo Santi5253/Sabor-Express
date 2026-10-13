@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Configuration — SaborExpress</title>
+  <link rel="stylesheet" href="/assets/css/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <h2 style="color:var(--brand-dark)">System Configuration</h2>
+    <div class="tabs" id="tabs"></div>
+
+    <div class="grid cols-2">
+      <div class="card">
+        <h2 id="listTitle">Records</h2>
+        <table>
+          <thead id="thead"></thead>
+          <tbody id="tbody"><tr><td class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2 id="formTitle">New record</h2>
+        <form id="form" onsubmit="submitForm(event)"></form>
+      </div>
+    </div>
+    <p class="muted">Records cannot be deleted (edit only) — per business rule.</p>
+  </div>
+
+  <script src="/assets/js/app.js"></script>
+  <script src="/assets/js/services/admin.service.js"></script>
+  <script>
+    const user = initPage(['Administrador']);
+    let branches = [], providers = [], currentResource = null, editingId = null;
+
+    const RESOURCES = {
+      users: {
+        label: 'Users', endpoint: 'users',
+        columns: [['full_name', 'Name'], ['email', 'Email'], ['role', 'Role'], ['is_active', 'Active']],
+        fields: [
+          { key: 'full_name', label: 'Full name', type: 'text' },
+          { key: 'email', label: 'Email', type: 'email' },
+          { key: 'password', label: 'Password (min 8)', type: 'password', createOnly: true },
+          { key: 'role', label: 'Role', type: 'select', options: ['Mesero', 'Cajero', 'Administrador'] },
+          { key: 'phone', label: 'Phone', type: 'text' },
+          { key: 'branch_id', label: 'Branch', type: 'selectRef', ref: 'branches' },
+          { key: 'is_active', label: 'Active', type: 'checkbox' }
+        ]
+      },
+      branches: {
+        label: 'Branches', endpoint: 'branches',
+        columns: [['name', 'Name'], ['address', 'Address'], ['phone', 'Phone'], ['is_active', 'Active']],
+        fields: [
+          { key: 'name', label: 'Name', type: 'text' },
+          { key: 'address', label: 'Address', type: 'text' },
+          { key: 'phone', label: 'Phone', type: 'text' },
+          { key: 'is_active', label: 'Active', type: 'checkbox' }
+        ]
+      },
+      providers: {
+        label: 'Providers', endpoint: 'providers',
+        columns: [['name', 'Name'], ['nit', 'NIT'], ['phone', 'Phone'], ['is_active', 'Active']],
+        fields: [
+          { key: 'name', label: 'Name', type: 'text' },
+          { key: 'nit', label: 'NIT (unique)', type: 'text' },
+          { key: 'phone', label: 'Phone', type: 'text' },
+          { key: 'email', label: 'Email', type: 'email' },
+          { key: 'address', label: 'Address', type: 'text' },
+          { key: 'is_active', label: 'Active', type: 'checkbox' }
+        ]
+      },
+      products: {
+        label: 'Products', endpoint: 'products',
+        columns: [['code', 'Code'], ['name', 'Name'], ['product_type', 'Type'], ['price', 'Price'], ['is_available', 'Available']],
+        fields: [
+          { key: 'code', label: 'Code (unique)', type: 'text' },
+          { key: 'name', label: 'Name', type: 'text' },
+          { key: 'product_type', label: 'Type', type: 'select', options: ['Entradas', 'Platos Fuertes', 'Bebidas', 'Postres'] },
+          { key: 'provider_id', label: 'Provider', type: 'selectRef', ref: 'providers' },
+          { key: 'price', label: 'Price', type: 'number' },
+          { key: 'branch_id', label: 'Branch', type: 'selectRef', ref: 'branches' },
+          { key: 'is_available', label: 'Available', type: 'checkbox' }
+        ]
+      },
+      tables: {
+        label: 'Tables', endpoint: 'tables', service: 'table',
+        columns: [['number', 'Number'], ['capacity', 'Capacity'], ['status', 'Status'], ['branch_id', 'Branch']],
+        fields: [
+          { key: 'number', label: 'Number', type: 'number' },
+          { key: 'capacity', label: 'Capacity', type: 'number' },
+          { key: 'branch_id', label: 'Branch', type: 'selectRef', ref: 'branches' },
+          { key: 'status', label: 'Status', type: 'select', options: ['Free', 'Occupied'] }
+        ]
+      }
+    };
+
+    function svc(resource) {
+      const r = RESOURCES[resource];
+      if (r.service === 'table') return { list: () => TableService.list(), create: b => TableService.create(b), update: (id, b) => TableService.update(id, b) };
+      return { list: () => AdminService.list(r.endpoint), create: b => AdminService.create(r.endpoint, b), update: (id, b) => AdminService.update(r.endpoint, id, b) };
+    }
+
+    function renderTabs() {
+      document.getElementById('tabs').innerHTML = Object.entries(RESOURCES).map(([k, r]) =>
+        `<button class="${k === currentResource ? 'active' : ''}" onclick="selectResource('${k}')">${r.label}</button>`).join('');
+    }
+
+    function refOptions(ref) {
+      const list = ref === 'branches' ? branches : providers;
+      return list.map(x => ({ value: x.id, label: ref === 'branches' ? x.name : `${x.name} (${x.nit})` }));
+    }
+
+    function renderForm(record) {
+      const r = RESOURCES[currentResource];
+      document.getElementById('formTitle').textContent = record ? 'Edit record' : 'New record';
+      document.getElementById('form').innerHTML = r.fields
+        .filter(f => !(f.createOnly && record))
+        .map(f => {
+          const val = record ? record[f.key] : '';
+          if (f.type === 'select') {
+            return `<label>${f.label}</label><select name="${f.key}">${f.options.map(o => `<option ${val === o ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+          }
+          if (f.type === 'selectRef') {
+            return `<label>${f.label}</label><select name="${f.key}">${refOptions(f.ref).map(o => `<option value="${o.value}" ${val == o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`;
+          }
+          if (f.type === 'checkbox') {
+            const checked = record ? (val ? 'checked' : '') : 'checked';
+            return `<label style="font-weight:400;color:#212529"><input type="checkbox" name="${f.key}" ${checked} style="width:auto;margin:0"> ${f.label}</label><br><br>`;
+          }
+          return `<label>${f.label}</label><input type="${f.type}" name="${f.key}" value="${val == null ? '' : esc(val)}" ${f.type === 'number' ? 'step="0.01"' : ''} ${f.createOnly ? 'required' : ''} />`;
+        }).join('') + `
+        <div style="display:flex;gap:8px">
+          <button type="submit">${record ? 'Update' : 'Create'}</button>
+          ${record ? '<button type="button" class="secondary" onclick="renderForm(null)">Cancel</button>' : ''}
+        </div>`;
+    }
+
+    async function loadList() {
+      const r = RESOURCES[currentResource];
+      document.getElementById('listTitle').textContent = r.label;
+      document.getElementById('thead').innerHTML = '<tr>' + r.columns.map(c => `<th>${c[1]}</th>`).join('') + '<th></th></tr>';
+      try {
+        const rows = await svc(currentResource).list();
+        document.getElementById('tbody').innerHTML = rows.length ? rows.map(row =>
+          `<tr>${r.columns.map(c => `<td>${formatCell(row[c[0]])}</td>`).join('')}
+           <td><button class="sm secondary" onclick='editRecord(${JSON.stringify(row).replace(/'/g, "&apos;")})'>Edit</button></td></tr>`
+        ).join('') : `<tr><td colspan="${r.columns.length + 1}" class="muted">No records.</td></tr>`;
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    function formatCell(v) {
+      if (typeof v === 'boolean') return v ? '<span class="badge closed">Yes</span>' : '<span class="badge occupied">No</span>';
+      return esc(v);
+    }
+
+    function editRecord(row) { editingId = row.id; renderForm(row); }
+
+    async function selectResource(key) {
+      currentResource = key; editingId = null;
+      renderTabs(); renderForm(null); await loadList();
+    }
+
+    async function submitForm(ev) {
+      ev.preventDefault();
+      const r = RESOURCES[currentResource];
+      const data = {};
+      r.fields.forEach(f => {
+        if (f.createOnly && editingId) return;
+        const el = document.getElementById('form').elements[f.key];
+        if (!el) return;
+        if (f.type === 'checkbox') data[f.key] = el.checked;
+        else if (f.type === 'number') data[f.key] = el.value === '' ? null : Number(el.value);
+        else if (f.type === 'selectRef') data[f.key] = Number(el.value);
+        else data[f.key] = el.value;
+      });
+      try {
+        if (editingId) { await svc(currentResource).update(editingId, data); toast('Record updated', 'success'); }
+        else { await svc(currentResource).create(data); toast('Record created', 'success'); }
+        editingId = null; renderForm(null); await loadList();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    (async function init() {
+      if (!user) return;
+      try {
+        branches = await AdminService.list('branches');
+        providers = await AdminService.list('providers');
+      } catch (e) {}
+      await selectResource('products');
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Close &amp; Pay — SaborExpress</title>
+  <link rel="stylesheet" href="/assets/css/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <h2 style="color:var(--brand-dark)">Close &amp; Pay</h2>
+    <div class="grid cols-2">
+      <!-- Open orders -->
+      <div class="card">
+        <h2>Open Orders</h2>
+        <table>
+          <thead><tr><th>Order #</th><th>Table</th><th>Total</th><th></th></tr></thead>
+          <tbody id="orders"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <!-- Bill + payment -->
+      <div class="card" id="payCard" style="display:none">
+        <h2>Bill — <span id="billOrder"></span></h2>
+        <div id="bill"></div>
+
+        <h3 style="margin-top:16px">Payment method (single method only)</h3>
+        <div style="display:flex;gap:14px;margin-bottom:10px">
+          <label style="font-weight:400;color:#212529"><input type="radio" name="pm" value="Cash" checked onchange="renderPaymentFields()" style="width:auto;margin:0"> Cash</label>
+          <label style="font-weight:400;color:#212529"><input type="radio" name="pm" value="Debit Card" onchange="renderPaymentFields()" style="width:auto;margin:0"> Debit Card</label>
+          <label style="font-weight:400;color:#212529"><input type="radio" name="pm" value="Credit Card" onchange="renderPaymentFields()" style="width:auto;margin:0"> Credit Card</label>
+        </div>
+
+        <div id="paymentFields"></div>
+        <button class="ok" style="width:100%" onclick="confirmPayment()">Confirm Payment</button>
+        <div id="invoiceContainer" style="margin-top:14px"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/js/app.js"></script>
+  <script src="/assets/js/services/order.service.js"></script>
+  <script src="/assets/js/services/payment.service.js"></script>
+  <script>
+    const user = initPage(['Cajero', 'Administrador']);
+    let currentOrder = null;
+
+    async function loadOrders() {
+      if (!user) return;
+      try {
+        const orders = await OrderService.openOrders(user.branch_id);
+        document.getElementById('orders').innerHTML = orders.length ? orders.map(o => `
+          <tr>
+            <td><strong>${esc(o.order_number)}</strong></td>
+            <td>Table ${o.table_id}</td>
+            <td>${money(o.total)}</td>
+            <td><button class="sm" onclick="selectOrder(${o.id})">Select</button></td>
+          </tr>`).join('') : '<tr><td colspan="4" class="muted">No open orders.</td></tr>';
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function selectOrder(id) {
+      try {
+        currentOrder = await OrderService.get(id);
+        document.getElementById('payCard').style.display = 'block';
+        document.getElementById('billOrder').textContent = currentOrder.order_number;
+        document.getElementById('bill').innerHTML = `
+          <div class="invoice">
+            <div style="text-align:center;font-weight:700">SABOREXPRESS</div>
+            <hr/>
+            ${currentOrder.items.map(i => `<div class="line"><span>${i.quantity}× #${i.product_id}</span><span>${money(i.subtotal)}</span></div>`).join('')}
+            <hr/>
+            <div class="line"><span>Subtotal</span><span>${money(currentOrder.total)}</span></div>
+            <div class="line"><span>IGV (18%)</span><span>${money(currentOrder.igv)}</span></div>
+            <div class="line" style="font-weight:700"><span>Total</span><span>${money(Number(currentOrder.total) + Number(currentOrder.igv))}</span></div>
+          </div>`;
+        document.getElementById('invoiceContainer').innerHTML = '';
+        renderPaymentFields();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    function grandTotal() { return Number(currentOrder.total) + Number(currentOrder.igv); }
+
+    function renderPaymentFields() {
+      const method = document.querySelector('input[name="pm"]:checked').value;
+      const box = document.getElementById('paymentFields');
+      if (method === 'Cash') {
+        box.innerHTML = `
+          <label>Amount given</label>
+          <input type="number" id="amountGiven" step="0.01" min="0" value="${grandTotal().toFixed(2)}" oninput="updateChange()" />
+          <div class="row" style="display:flex;justify-content:space-between"><span>Change</span><strong id="change">S/ 0.00</strong></div>`;
+        updateChange();
+      } else {
+        box.innerHTML = `
+          <label>Last 4 digits</label>
+          <input id="lastFour" maxlength="4" placeholder="1234" />
+          <label>Authorization number (max 20)</label>
+          <input id="authNumber" maxlength="20" placeholder="AUTH-..." />`;
+      }
+    }
+
+    function updateChange() {
+      const given = parseFloat(document.getElementById('amountGiven').value) || 0;
+      const change = given - grandTotal();
+      document.getElementById('change').textContent = money(change > 0 ? change : 0);
+    }
+
+    async function confirmPayment() {
+      if (!currentOrder) return;
+      const method = document.querySelector('input[name="pm"]:checked').value;
+      try {
+        let payment;
+        if (method === 'Cash') {
+          const given = parseFloat(document.getElementById('amountGiven').value);
+          if (isNaN(given)) throw new Error('Enter the amount given');
+          payment = await PaymentService.payCash(currentOrder.id, given);
+        } else {
+          const lastFour = document.getElementById('lastFour').value.trim();
+          const auth = document.getElementById('authNumber').value.trim();
+          payment = await PaymentService.payCard(currentOrder.id, method, lastFour, auth);
+        }
+        toast('Payment confirmed successfully', 'success');
+        showInvoice(payment);
+        document.getElementById('payCard').style.display = 'none';
+        currentOrder = null;
+        await loadOrders();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    function showInvoice(p) {
+      const changeLine = p.method === 'Cash'
+        ? `<div class="line"><span>Given</span><span>${money(p.amount_given)}</span></div>
+           <div class="line"><span>Change</span><span>${money(p.change)}</span></div>` : '';
+      document.getElementById('invoiceContainer').innerHTML = `
+        <div class="invoice">
+          <div style="text-align:center;font-weight:700">INVOICE — SABOREXPRESS</div>
+          <hr/>
+          <div class="line"><span>Order</span><span>#${p.order_id}</span></div>
+          <div class="line"><span>Method</span><span>${p.method}</span></div>
+          <div class="line"><span>Total</span><span>${money(p.total_amount)}</span></div>
+          ${changeLine}
+          <hr/>
+          <div style="text-align:center;font-size:11px">Thank you! (screen invoice — not electronic)</div>
+        </div>`;
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    }
+
+    loadOrders();
+    setInterval(loadOrders, 10000);
+  </script>
+</body>
+</html>
