@@ -23,6 +23,7 @@ class PaymentResponse(BaseModel):
     total_amount: float
     amount_given: float | None = None
     change: float | None = None
+    change_breakdown: dict | None = None  # vuelto óptimo (algoritmo voraz)
     last_four_digits: str | None = None
     authorization_number: str | None = None
     cashier_id: int

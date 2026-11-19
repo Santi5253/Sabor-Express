@@ -1,13 +1,23 @@
 """Gestión de mesas y mapa de mesas."""
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.middleware.auth_middleware import get_current_user, require_admin
 from app.models.table import RestaurantTable
+from app.models.user import User, UserRole
 from app.schemas.table import TableCreate, TableResponse, TableUpdate
+from app.utils.algorithms import backtrack_assign
 
 router = APIRouter()
+
+
+class AssignTablesRequest(BaseModel):
+    table_ids: List[int]
+    mesero_ids: List[int]
 
 
 @router.get("/", response_model=list[TableResponse])
@@ -43,3 +53,13 @@ def update_table(table_id: int, request: TableUpdate, db: Session = Depends(get_
     db.commit()
     db.refresh(table)
     return table
+
+
+@router.post("/assign", dependencies=[Depends(get_current_user)])
+def assign_tables(request: AssignTablesRequest, db: Session = Depends(get_db)):
+    tables = db.query(RestaurantTable).filter(RestaurantTable.id.in_(request.table_ids)).all()
+    meseros = db.query(User).filter(User.id.in_(request.mesero_ids), User.role == UserRole.MESERO).all()
+    result = backtrack_assign(tables, meseros)
+    if result is None:
+        raise HTTPException(status_code=400, detail="No valid assignment found (backtracking)")
+    return [{"table_id": t.id, "table_number": t.number, "mesero_id": m.id, "mesero_name": m.full_name} for t, m in result]

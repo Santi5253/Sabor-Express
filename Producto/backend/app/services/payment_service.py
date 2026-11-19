@@ -7,6 +7,7 @@ from app.models.order import Order, OrderStatus
 from app.models.payment import Payment, PaymentMethod
 from app.models.table import RestaurantTable, TableStatus
 from app.models.user import User
+from app.utils.algorithms import greedy_change
 
 
 class PaymentError(Exception):
@@ -33,7 +34,9 @@ def create_payment(db: Session, cashier: User, payload) -> Payment:
         if payload.amount_given is None or Decimal(str(payload.amount_given)) < total:
             raise PaymentError(400, "Insufficient amount")
         change = (Decimal(str(payload.amount_given)) - total).quantize(Decimal("0.01"))
+        change_breakdown = greedy_change(float(change))
     else:
+        change_breakdown = None
         if not payload.last_four_digits or not payload.authorization_number:
             raise PaymentError(400, "Card details required (last 4 digits and authorization number)")
         if len(payload.last_four_digits) != 4 or not payload.last_four_digits.isdigit():
@@ -72,4 +75,5 @@ def create_payment(db: Session, cashier: User, payload) -> Payment:
 
     db.commit()
     db.refresh(payment)
+    setattr(payment, "change_breakdown", change_breakdown)
     return payment
